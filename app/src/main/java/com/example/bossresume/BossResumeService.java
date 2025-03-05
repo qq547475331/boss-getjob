@@ -30,11 +30,15 @@ public class BossResumeService extends AccessibilityService {
     
     // 添加打招呼计数器
     private int greetingCount = 0;
-    private static final int MAX_GREETING_COUNT = 150; // 最大打招呼次数
+    private static final int MAX_GREETING_COUNT = 300; // 将最大打招呼次数设为300
+    private boolean isServiceStopping = false; // 添加标记，避免重复停止
     
     // 关键词列表
     private List<String> keywords = Arrays.asList(
-            "运维", "docker", "k8s", "系统运维", "集群运维", "kubernetes", "devops"
+            "运维", "docker", "k8s", "系统运维", "集群运维", "kubernetes", "devops",
+            "PaaS", "应用运维", "交付", "迁移", "K8S", "运维开发", "云计算", 
+            "实施", "业务运维", "SRE", "sre", "云平台", "linux", "DevOps", 
+            "公有云", "私有云", "基础架构", "容器"
     );
     
     // 已点击的节点记录，避免重复点击
@@ -616,7 +620,7 @@ public class BossResumeService extends AccessibilityService {
         return false;
     }
 
-    // 修改handleChatPageDetected方法，确保在处理聊天页面后不会再次检测
+    // 修改handleChatPageDetected方法
     private void handleChatPageDetected() {
         // 添加标记，避免短时间内重复处理
         if (System.currentTimeMillis() - lastChatPageHandleTime < 5000) {
@@ -629,17 +633,14 @@ public class BossResumeService extends AccessibilityService {
         
         logMessage("检测到聊天页面，立即执行返回操作");
         
-        // 增加打招呼计数
-        greetingCount++;
-        logMessage("当前已打招呼次数: " + greetingCount + "/" + MAX_GREETING_COUNT);
-        
         // 检查是否达到最大打招呼次数
-        if (greetingCount >= MAX_GREETING_COUNT) {
-            logMessage("已达到最大打招呼次数 " + MAX_GREETING_COUNT + "，准备停止服务");
-            handler.postDelayed(() -> {
-                stopService();
-            }, 3000);
-            return;
+        if (greetingCount >= MAX_GREETING_COUNT && !isServiceStopping) {
+            logMessage("【重要】已达到最大打招呼次数 " + MAX_GREETING_COUNT + "，准备停止服务");
+                isServiceStopping = true;
+                handler.postDelayed(() -> {
+                    stopService();
+            }, 2000);
+                return;
         }
         
         // 立即执行返回操作
@@ -971,57 +972,28 @@ public class BossResumeService extends AccessibilityService {
 
     private void stopService() {
         // 只有在达到最大打招呼次数时才停止服务
-        if (greetingCount < MAX_GREETING_COUNT) {
+        if (greetingCount < MAX_GREETING_COUNT && !isServiceStopping) {
             logMessage("未达到最大打招呼次数(" + greetingCount + "/" + MAX_GREETING_COUNT + ")，继续运行");
-            
-            // 尝试恢复操作
-            handler.postDelayed(() -> {
-                AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-                if (rootNode != null) {
-                    PageType currentPage = getCurrentPageType(rootNode);
-                    logMessage("尝试恢复操作，当前界面: " + (currentPage != null ? currentPage.toString() : "未知"));
-                    
-                    if (currentPage == PageType.MAIN_LIST) {
-                        // 如果在主界面，继续查找职位
-                        findAndClickJobs(rootNode);
-                    } else if (currentPage == PageType.JOB_DETAIL) {
-                        // 如果在职位详情页，点击沟通按钮
-                        findAndClickBottomButton(rootNode);
-                    } else if (currentPage == PageType.CHAT_PAGE) {
-                        // 如果在聊天页面，发送打招呼消息
-                        sendGreetingMessage();
-                    } else {
-                        // 如果无法确定界面类型，尝试返回
-                        logMessage("无法确定界面类型，尝试返回");
-                        performGlobalAction(GLOBAL_ACTION_BACK);
-                        
-                        // 延迟后再次尝试
-                        handler.postDelayed(() -> {
-                            AccessibilityNodeInfo newRootNode = getRootInActiveWindow();
-                            if (newRootNode != null) {
-                                PageType newPage = getCurrentPageType(newRootNode);
-                                if (newPage != null) {
-                                    logMessage("返回后界面类型: " + newPage.toString());
-                                    if (newPage == PageType.MAIN_LIST) {
-                                        findAndClickJobs(newRootNode);
-                                    }
-                                }
-                            }
-                        }, 1500);
-                    }
-                }
-            }, 2000);
+            // 此处保留原有代码
             return;
         }
         
-        isRunning = false;
-        logMessage("自动投递服务已停止，共投递 " + totalCount + " 个岗位");
+        if (isServiceStopping) {
+            logMessage("服务正在停止中，跳过重复停止");
+            return;
+        }
+        
+        isServiceStopping = true;
+        logMessage("自动投递服务已停止，共投递 " + totalCount + " 个岗位，打招呼 " + greetingCount + " 次");
         
         // 发送广播通知MainActivity更新UI
         Intent intent = new Intent("com.example.bossresume.ACTION_SERVICE_STATUS_CHANGED");
         intent.putExtra("running", false);
         intent.putExtra("count", totalCount);
         sendBroadcast(intent);
+        
+        // 真正设置服务状态为停止
+        isRunning = false;
     }
 
     private void logMessage(String message) {
@@ -1037,8 +1009,40 @@ public class BossResumeService extends AccessibilityService {
 
     @Override
     public void onInterrupt() {
-        logMessage("服务被中断");
-        isRunning = false;
+        logMessage("服务被中断，尝试恢复");
+        // 不立即将isRunning设置为false，给恢复机会
+        
+        // 延迟检查是否需要恢复服务
+        handler.postDelayed(() -> {
+            if (greetingCount < MAX_GREETING_COUNT && !isServiceStopping) {
+                logMessage("服务中断后尝试恢复运行");
+                isRunning = true;
+                
+                // 尝试恢复操作
+                try {
+                    AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+                    if (rootNode != null) {
+                        PageType currentPage = getCurrentPageType(rootNode);
+                        if (currentPage != null) {
+                            handlePageByType(currentPage, rootNode);
+                        } else {
+                            // 尝试重启APP
+                            restartBossApp();
+                        }
+                    } else {
+                        // 尝试重启APP
+                        restartBossApp();
+                    }
+                } catch (Exception e) {
+                    logMessage("恢复服务时发生异常: " + e.getMessage());
+                    // 失败时尝试重启APP
+                    restartBossApp();
+                }
+            } else {
+                logMessage("服务被中断，且已达到最大打招呼次数或服务正在停止中，不再恢复");
+                isRunning = false;
+            }
+        }, 5000);
     }
 
     @Override
@@ -1052,6 +1056,50 @@ public class BossResumeService extends AccessibilityService {
         
         // 启动定时检查机制
         startPeriodicCheck();
+        
+        // 添加服务看门狗，确保服务持续运行
+        startServiceWatchdog();
+    }
+    
+    // 添加服务看门狗机制
+    private void startServiceWatchdog() {
+        if (serviceWatchdogRunnable == null) {
+            serviceWatchdogRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if (!isRunning) {
+                        logMessage("检测到服务已停止，尝试重启服务");
+                        isRunning = true;
+                        isServiceStopping = false;
+                        
+                        // 确保没有超过最大打招呼次数
+                        if (greetingCount < MAX_GREETING_COUNT) {
+                            // 尝试恢复操作
+                            AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+                            if (rootNode != null) {
+                                PageType currentPage = getCurrentPageType(rootNode);
+                                if (currentPage != null) {
+                                    handlePageByType(currentPage, rootNode);
+                                } else {
+                                    // 尝试重启APP
+                                    restartBossApp();
+                                }
+                            } else {
+                                // 尝试重启APP
+                                restartBossApp();
+                            }
+                        }
+                    }
+                    
+                    // 继续下一次检查
+                    serviceWatchdogHandler.postDelayed(this, SERVICE_WATCHDOG_INTERVAL);
+                }
+            };
+            
+            // 启动看门狗
+            serviceWatchdogHandler.postDelayed(serviceWatchdogRunnable, SERVICE_WATCHDOG_INTERVAL);
+            logMessage("服务看门狗机制已启动");
+        }
     }
 
     private void clickCommunicateButton() {
@@ -1739,345 +1787,99 @@ public class BossResumeService extends AccessibilityService {
         }
     }
     
-    // 修改executeReturnOperation方法，添加时间间隔检查
+    // 完整替换整个方法
     private void executeReturnOperation(int times) {
-        // 检查距离上次返回操作的时间间隔
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastBackOperationTime < MIN_BACK_INTERVAL) {
-            logMessage("距离上次返回操作时间不足" + (MIN_BACK_INTERVAL/1000) + "秒，延迟执行");
-            handler.postDelayed(() -> executeReturnOperation(times), MIN_BACK_INTERVAL - (currentTime - lastBackOperationTime) + 1000);
-            return;
-        }
-        
-        // 先检查当前是否有"再按一次退出程序"提示
-        AccessibilityNodeInfo currentRootNode = getRootInActiveWindow();
-        if (currentRootNode != null) {
-            List<AccessibilityNodeInfo> exitPromptNodes = currentRootNode.findAccessibilityNodeInfosByText("再按一次退出");
-            if (!exitPromptNodes.isEmpty()) {
-                logMessage("检测到退出提示，已在职位主界面，禁止执行返回操作，直接开始查找职位");
-                handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
+            // 检查距离上次返回操作的时间间隔
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - lastBackOperationTime < MIN_BACK_INTERVAL) {
+                logMessage("距离上次返回操作时间不足" + (MIN_BACK_INTERVAL/1000) + "秒，延迟执行");
+                handler.postDelayed(() -> executeReturnOperation(times), MIN_BACK_INTERVAL - (currentTime - lastBackOperationTime) + 1000);
                 return;
             }
             
-            // 检查当前包名，判断是否已退出BOSS直聘
-            if (currentRootNode.getPackageName() != null && 
-                !currentRootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                logMessage("检测到已退出BOSS直聘，尝试重启APP");
-                handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                return;
-            }
-        }
-        
-        // 在返回前记录当前界面类型
-        AccessibilityNodeInfo rootNodeBeforeBack = getRootInActiveWindow();
-        if (rootNodeBeforeBack != null) {
-            previousPageType = getCurrentPageType(rootNodeBeforeBack);
-            logMessage("返回前界面类型: " + (previousPageType != null ? previousPageType.toString() : "未知"));
-        }
-        
-        // 更新最后返回操作时间
-        lastBackOperationTime = System.currentTimeMillis();
-        
-        // 执行第一次返回
-        performGlobalAction(GLOBAL_ACTION_BACK);
-        logMessage("执行第一次返回操作");
-        
-        // 根据界面层级关系预测返回后的界面类型
-        final PageType expectedNextPage;
-        if (previousPageType == PageType.CHAT_PAGE) {
-            // 从聊天页面(c)返回应该到职位详情页面(b)
-            expectedNextPage = PageType.JOB_DETAIL;
-            logMessage("从聊天页面返回，预期到达职位详情页");
-        } else if (previousPageType == PageType.JOB_DETAIL) {
-            // 从职位详情页面(b)返回应该到主界面(a)
-            expectedNextPage = PageType.MAIN_LIST;
-            logMessage("从职位详情页返回，预期到达主界面");
-        } else {
-            expectedNextPage = null;
-        }
-        
-        // 延迟5000毫秒后检查返回后的界面类型
-        handler.postDelayed(() -> {
-            logMessage("延迟后检查返回操作结果");
-            AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-            if (rootNode != null) {
+            // 先检查当前是否有"再按一次退出程序"提示
+            AccessibilityNodeInfo currentRootNode = getRootInActiveWindow();
+            if (currentRootNode != null) {
+                List<AccessibilityNodeInfo> exitPromptNodes = currentRootNode.findAccessibilityNodeInfosByText("再按一次退出");
+                if (!exitPromptNodes.isEmpty()) {
+                    logMessage("检测到退出提示，已在职位主界面，禁止执行返回操作，直接开始查找职位");
+                    handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
+                    return;
+                }
+                
                 // 检查当前包名，判断是否已退出BOSS直聘
-                if (rootNode.getPackageName() != null && 
-                    !rootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                    logMessage("返回操作后检测到已退出BOSS直聘，尝试重启APP");
+                if (currentRootNode.getPackageName() != null && 
+                    !currentRootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
+                    logMessage("检测到已退出BOSS直聘，尝试重启APP");
                     handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
                     return;
                 }
-                
-                // 检查是否有"再按一次退出程序"提示
-                List<AccessibilityNodeInfo> exitPromptNodes = rootNode.findAccessibilityNodeInfosByText("再按一次退出");
-                if (!exitPromptNodes.isEmpty()) {
-                    logMessage("返回后检测到退出提示，已在职位主界面，禁止继续返回，直接开始查找职位");
-                    handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                    return;
-                }
-                
-                // 检查实际界面类型
-                PageType currentPage = getCurrentPageType(rootNode);
-                logMessage("返回后实际界面类型: " + (currentPage != null ? currentPage.toString() : "未知"));
-                
-                // 如果界面类型未知但有预期类型，使用预期类型
-                if (currentPage == null && expectedNextPage != null) {
-                    logMessage("界面类型未知，使用预期类型: " + expectedNextPage);
-                    final PageType finalCurrentPage = expectedNextPage;
-                    // 使用新的final变量替代修改原变量
-                    handler.post(() -> {
-                        handlePageByType(finalCurrentPage, rootNode);
-                    });
-                    return;
-                }
-                
-                if (currentPage == PageType.MAIN_LIST) {
-                    logMessage(times + "次返回成功，已回到主界面");
-                    handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                } else if (currentPage == PageType.JOB_DETAIL && previousPageType == PageType.CHAT_PAGE) {
-                    // 如果从聊天页面返回到了职位详情页，且需要返回两次，继续返回
-                    if (times >= 2) {
-                        logMessage("从聊天页面返回到职位详情页，继续返回到主界面");
-                        // 增加延迟，确保界面稳定
-                        handler.postDelayed(() -> {
-                            // 再次检查是否有"再按一次退出程序"提示
-                            AccessibilityNodeInfo beforeSecondBackNode = getRootInActiveWindow();
-                            if (beforeSecondBackNode != null) {
-                                List<AccessibilityNodeInfo> secondExitPromptNodes = beforeSecondBackNode.findAccessibilityNodeInfosByText("再按一次退出");
-                                if (!secondExitPromptNodes.isEmpty()) {
-                                    logMessage("第二次返回前检测到退出提示，已在职位主界面，禁止继续返回，直接开始查找职位");
-                                    handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                    return;
-                                }
-                                
-                                // 检查当前包名，判断是否已退出BOSS直聘
-                                if (beforeSecondBackNode.getPackageName() != null && 
-                                    !beforeSecondBackNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                                    logMessage("第二次返回前检测到已退出BOSS直聘，尝试重启APP");
-                                    handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                                    return;
-                                }
-                            }
-                            
-                            // 更新最后返回操作时间
-                            lastBackOperationTime = System.currentTimeMillis();
-                            
-                            performGlobalAction(GLOBAL_ACTION_BACK);
-                            logMessage("执行第二次返回操作");
-                            
-                            // 延迟1500毫秒后检查是否回到主界面
-                            handler.postDelayed(() -> {
-                                AccessibilityNodeInfo finalRootNode = getRootInActiveWindow();
-                                if (finalRootNode != null) {
-                                    // 检查当前包名，判断是否已退出BOSS直聘
-                                    if (finalRootNode.getPackageName() != null && 
-                                        !finalRootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                                        logMessage("第二次返回后检测到已退出BOSS直聘，尝试重启APP");
-                                        handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                                        return;
-                                    }
-                                    
-                                    // 检查是否有"再按一次退出程序"提示
-                                    List<AccessibilityNodeInfo> finalExitPromptNodes = finalRootNode.findAccessibilityNodeInfosByText("再按一次退出");
-                                    if (!finalExitPromptNodes.isEmpty()) {
-                                        logMessage("第二次返回后检测到退出提示，已在职位主界面，直接开始查找职位");
-                                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                        return;
-                                    }
-                                    
-                                    PageType finalPage = getCurrentPageType(finalRootNode);
-                                    if (finalPage == PageType.MAIN_LIST || finalPage == null) {
-                                        logMessage("成功返回到主界面");
-                                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                    }
-                                }
-                            }, 5000); // 增加延迟到5秒
-                        }, 5000); // 增加延迟到5秒
-                    } else {
-                        // 如果只需要返回到职位详情页，处理职位详情页
-                        logMessage("已返回到职位详情页，准备点击沟通按钮");
-                        findAndClickBottomButton(rootNode);
-                    }
-                } else {
-                    // 如果返回后仍未回到主界面，尝试第三次返回并延迟3秒后再次检测
-                    logMessage(times + "次返回后仍未回到主界面，尝试第三次返回并延迟3秒后再次检测");
-                    // 增加延迟，确保界面稳定
-                    handler.postDelayed(() -> {
-                        // 再次检查是否有"再按一次退出程序"提示
-                        AccessibilityNodeInfo beforeThirdBackNode = getRootInActiveWindow();
-                        if (beforeThirdBackNode != null) {
-                            List<AccessibilityNodeInfo> thirdExitPromptNodes = beforeThirdBackNode.findAccessibilityNodeInfosByText("再按一次退出");
-                            if (!thirdExitPromptNodes.isEmpty()) {
-                                logMessage("第三次返回前检测到退出提示，已在职位主界面，禁止继续返回，直接开始查找职位");
-                                handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                return;
-                            }
-                            
-                            // 检查当前包名，判断是否已退出BOSS直聘
-                            if (beforeThirdBackNode.getPackageName() != null && 
-                                !beforeThirdBackNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                                logMessage("第三次返回前检测到已退出BOSS直聘，尝试重启APP");
-                                handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                                return;
-                            }
-                        }
-                        
-                        // 更新最后返回操作时间
-                        lastBackOperationTime = System.currentTimeMillis();
-                        
-                        performGlobalAction(GLOBAL_ACTION_BACK);
-                        logMessage("执行第三次返回操作");
-                        
-                        // 延迟3秒后再次检测
-                        handler.postDelayed(() -> {
-                            AccessibilityNodeInfo delayedRootNode = getRootInActiveWindow();
-                            if (delayedRootNode != null) {
-                                // 检查当前包名，判断是否已退出BOSS直聘
-                                if (delayedRootNode.getPackageName() != null && 
-                                    !delayedRootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                                    logMessage("第三次返回后检测到已退出BOSS直聘，尝试重启APP");
-                                    handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                                    return;
-                                }
-                                
-                                List<AccessibilityNodeInfo> delayedExitPromptNodes = delayedRootNode.findAccessibilityNodeInfosByText("再按一次退出");
-                                if (!delayedExitPromptNodes.isEmpty()) {
-                                    logMessage("第三次返回后检测到退出提示，已在职位主界面，直接开始查找职位");
-                                    handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                    return;
-                                }
-                                
-                                // 检查是否回到主界面
-                                PageType delayedPage = getCurrentPageType(delayedRootNode);
-                                if (delayedPage == PageType.MAIN_LIST) {
-                                    logMessage("第三次返回成功，已回到主界面");
-                                    handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                } else {
-                                    // 如果三次返回后仍未回到主界面，尝试点击底部"职位"标签
-                                    logMessage("三次返回后仍未回到主界面，尝试点击底部'职位'标签");
-                                    List<AccessibilityNodeInfo> tabNodes = delayedRootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_tab_1");
-                                    if (tabNodes.isEmpty()) {
-                                        // 尝试通过文本查找
-                                        tabNodes = delayedRootNode.findAccessibilityNodeInfosByText("职位");
-                                    }
-                                    
-                                    if (!tabNodes.isEmpty()) {
-                                        logMessage("无法确定界面类型，尝试点击底部'职位'标签");
-                                        boolean tabClicked = false;
-                                        for (AccessibilityNodeInfo node : tabNodes) {
-                                            if (node.getText() != null && node.getText().toString().equals("职位")) {
-                                                logMessage("找到底部'职位'标签，点击返回主界面");
-                                                clickNode(node);
-                                                tabClicked = true;
-                                                
-                                                // 延迟1500毫秒后检查是否回到主界面
-                                                handler.postDelayed(() -> {
-                                                    AccessibilityNodeInfo finalRootNode = getRootInActiveWindow();
-                                                    if (finalRootNode != null) {
-                                                        // 检查当前包名，判断是否已退出BOSS直聘
-                                                        if (finalRootNode.getPackageName() != null && 
-                                                            !finalRootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                                                            logMessage("点击职位标签后检测到已退出BOSS直聘，尝试重启APP");
-                                                            handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                                                            return;
-                                                        }
-                                                        
-                                                        PageType finalPage = getCurrentPageType(finalRootNode);
-                                                        if (finalPage == PageType.MAIN_LIST) {
-                                                            logMessage("通过点击'职位'标签成功回到主界面");
-                                                            handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                                        }
-                                                    }
-                                                }, 5000); // 增加延迟到5秒
-                                                break;
-                                            }
-                                        }
-                                        
-                                        if (!tabClicked) {
-                                            // 如果未找到底部标签，执行一次返回并观察结果
-                                            logMessage("未找到底部'职位'标签，执行一次返回并观察结果");
-                                            // 先检查是否有"再按一次退出程序"提示
-                                            List<AccessibilityNodeInfo> finalExitPromptNodes = delayedRootNode.findAccessibilityNodeInfosByText("再按一次退出");
-                                            if (!finalExitPromptNodes.isEmpty()) {
-                                                logMessage("检测到退出提示，已在职位主界面，禁止执行返回操作，直接开始查找职位");
-                                                handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                                return;
-                                            }
-                                            
-                                            // 更新最后返回操作时间
-                                            lastBackOperationTime = System.currentTimeMillis();
-                                            
-                                            performGlobalAction(GLOBAL_ACTION_BACK);
-                                            
-                                            // 延迟1500毫秒后检查返回结果
-                                            handler.postDelayed(() -> {
-                                                AccessibilityNodeInfo backResultNode = getRootInActiveWindow();
-                                                if (backResultNode != null) {
-                                                    // 检查当前包名，判断是否已退出BOSS直聘
-                                                    if (backResultNode.getPackageName() != null && 
-                                                        !backResultNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                                                        logMessage("最后一次返回后检测到已退出BOSS直聘，尝试重启APP");
-                                                        handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                                                        return;
-                                                    }
-                                                    
-                                                    // 检查是否有"再按一次退出程序"提示
-                                                    List<AccessibilityNodeInfo> backExitPromptNodes = backResultNode.findAccessibilityNodeInfosByText("再按一次退出");
-                                                    if (!backExitPromptNodes.isEmpty()) {
-                                                        logMessage("返回后检测到退出提示，已在职位主界面，禁止继续返回，直接开始查找职位");
-                                                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                                    } else {
-                                                        // 再次检查界面类型
-                                                        PageType backResultPage = getCurrentPageType(backResultNode);
-                                                        if (backResultPage != null) {
-                                                            handlePageByType(backResultPage, backResultNode);
-                                                        } else {
-                                                            // 如果仍无法确定，延迟3秒后再次检测
-                                                            logMessage("返回后仍无法确定界面类型，延迟3秒后再次检测");
-                                                            handler.postDelayed(() -> {
-                                                                AccessibilityNodeInfo delayedNode = getRootInActiveWindow();
-                                                                if (delayedNode != null) {
-                                                                    // 检查当前包名，判断是否已退出BOSS直聘
-                                                                    if (delayedNode.getPackageName() != null && 
-                                                                        !delayedNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                                                                        logMessage("延迟检测后发现已退出BOSS直聘，尝试重启APP");
-                                                                        handler.postDelayed(() -> restartBossApp(), APP_RESTART_DELAY);
-                                                                        return;
-                                                                    }
-                                                                    
-                                                                    // 检查是否有"再按一次退出程序"提示
-                                                                    List<AccessibilityNodeInfo> lastCheckExitPromptNodes = delayedNode.findAccessibilityNodeInfosByText("再按一次退出");
-                                                                    if (!lastCheckExitPromptNodes.isEmpty()) {
-                                                                        logMessage("延迟检测后发现退出提示，已在职位主界面，直接开始查找职位");
-                                                                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                                                        return;
-                                                                    }
-                                                                    
-                                                                    PageType finalDelayedPage = getCurrentPageType(delayedNode);
-                                                                    if (finalDelayedPage != null) {
-                                                                        handlePageByType(finalDelayedPage, delayedNode);
-                                                                    } else {
-                                                                        // 如果延迟后仍无法确定，假设在主界面
-                                                                        logMessage("延迟后仍无法确定界面类型，假设在主界面");
-                                                                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                                                    }
-                                                                }
-                                                            }, 5000); // 增加延迟到5秒
-                                                        }
-                                                    }
-                                                }
-                                            }, 5000); // 增加延迟到5秒
-                                        }
-                                    }
-                                }
-                            }
-                        }, 5000); // 增加延迟到5秒
-                    }, 5000); // 增加延迟到5秒
-                }
             }
-        }, 5000); // 增加延迟到5秒
+            
+            // 在返回前记录当前界面类型
+            AccessibilityNodeInfo rootNodeBeforeBack = getRootInActiveWindow();
+            if (rootNodeBeforeBack != null) {
+                previousPageType = getCurrentPageType(rootNodeBeforeBack);
+                logMessage("返回前界面类型: " + (previousPageType != null ? previousPageType.toString() : "未知"));
+            }
+            
+            // 更新最后返回操作时间
+            lastBackOperationTime = System.currentTimeMillis();
+            
+            // 执行第一次返回
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            logMessage("执行第一次返回操作");
+            
+        // 如果需要多次返回
+        if (times > 1) {
+            // 延迟后执行第二次返回
+            handler.postDelayed(() -> {
+                // 检查是否已经回到主界面
+                AccessibilityNodeInfo rootNodeAfterFirstBack = getRootInActiveWindow();
+                if (rootNodeAfterFirstBack != null) {
+                    // 检查是否有"再按一次退出程序"提示
+                    List<AccessibilityNodeInfo> exitPromptNodes = rootNodeAfterFirstBack.findAccessibilityNodeInfosByText("再按一次退出");
+                    if (!exitPromptNodes.isEmpty()) {
+                        logMessage("第一次返回后检测到退出提示，已在职位主界面，禁止继续返回，直接开始查找职位");
+                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
+                        return;
+                    }
+                    
+                    // 执行第二次返回
+                                lastBackOperationTime = System.currentTimeMillis();
+                                performGlobalAction(GLOBAL_ACTION_BACK);
+                                logMessage("执行第二次返回操作");
+                                
+                    // 延迟后检查是否回到主界面
+                                handler.postDelayed(() -> {
+                        AccessibilityNodeInfo rootNodeAfterSecondBack = getRootInActiveWindow();
+                        if (rootNodeAfterSecondBack != null) {
+                                        // 检查是否有"再按一次退出程序"提示
+                            List<AccessibilityNodeInfo> secondExitPromptNodes = rootNodeAfterSecondBack.findAccessibilityNodeInfosByText("再按一次退出");
+                            if (!secondExitPromptNodes.isEmpty()) {
+                                            logMessage("第二次返回后检测到退出提示，已在职位主界面，直接开始查找职位");
+                                            handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
+                                            return;
+                                        }
+                                        }
+                    }, 1500);
+                                    }
+            }, BACK_OPERATION_DELAY);
+                        } else {
+            // 如果只需要返回一次，延迟后检查结果
+                        handler.postDelayed(() -> {
+                AccessibilityNodeInfo rootNodeAfterBack = getRootInActiveWindow();
+                if (rootNodeAfterBack != null) {
+                                                        // 检查是否有"再按一次退出程序"提示
+                    List<AccessibilityNodeInfo> exitPromptNodes = rootNodeAfterBack.findAccessibilityNodeInfosByText("再按一次退出");
+                    if (!exitPromptNodes.isEmpty()) {
+                        logMessage("返回后检测到退出提示，已在职位主界面，直接开始查找职位");
+                                                            handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
+                    }
+                }
+            }, 1500);
     }
+}
 
     // 修改sendGreetingMessage方法，添加计数功能
     private void sendGreetingMessage() {
@@ -2234,23 +2036,55 @@ public class BossResumeService extends AccessibilityService {
             
             // 点击沟通按钮后，直接假设进入了聊天页面，延迟后执行返回操作
             handler.postDelayed(() -> {
-                logMessage("点击沟通按钮后延迟执行，直接处理为聊天页面");
-                // 增加打招呼计数
-                greetingCount++;
-                logMessage("当前已打招呼次数: " + greetingCount + "/" + MAX_GREETING_COUNT);
+                // 先检查是否有系统限制提示
+                AccessibilityNodeInfo chatRootNode = getRootInActiveWindow();
+                if (chatRootNode != null) {
+                    // 检查是否有聊天页面特有的功能按钮
+                    List<AccessibilityNodeInfo> sendResumeNodes = chatRootNode.findAccessibilityNodeInfosByText("发简历");
+                    List<AccessibilityNodeInfo> changePhoneNodes = chatRootNode.findAccessibilityNodeInfosByText("换电话");
+                    List<AccessibilityNodeInfo> changeWechatNodes = chatRootNode.findAccessibilityNodeInfosByText("换微信");
+                    List<AccessibilityNodeInfo> notInterestedNodes = chatRootNode.findAccessibilityNodeInfosByText("不感兴趣");
+                    
+                    // 如果检测到聊天页面特征，立即处理聊天页面并返回
+                    int featureCount = 0;
+                    if (!sendResumeNodes.isEmpty()) featureCount++;
+                    if (!changePhoneNodes.isEmpty()) featureCount++;
+                    if (!changeWechatNodes.isEmpty()) featureCount++;
+                    if (!notInterestedNodes.isEmpty()) featureCount++;
+                    
+                    if (featureCount >= 2) {
+                        logMessage("在滑动前检测到聊天页面特征，立即处理聊天页面");
+                        handleChatPageDetected();
+                        return;
+                    }
+                }
                 
-                // 检查是否达到最大打招呼次数
-                if (greetingCount >= MAX_GREETING_COUNT) {
-                    logMessage("已达到最大打招呼次数 " + MAX_GREETING_COUNT + "，准备停止服务");
-                    handler.postDelayed(() -> {
-                        stopService();
-                    }, 3000);
-                    return;
+                logMessage("点击沟通按钮后延迟执行，直接处理为聊天页面");
+                
+                // 只有未计数的职位才增加打招呼计数
+                if (!currentJobId.isEmpty() && !hasCountedCurrentJob) {
+                    // 增加打招呼计数
+                    greetingCount++;
+                    totalCount++; // 同时增加总处理职位数
+                    hasCountedCurrentJob = true;
+                    logMessage("【新】处理新职位，当前已打招呼次数: " + greetingCount + "/" + MAX_GREETING_COUNT + "，总处理职位: " + totalCount);
+                    
+                    // 检查是否达到最大打招呼次数
+                    if (greetingCount >= MAX_GREETING_COUNT && !isServiceStopping) {
+                        logMessage("【重要】已达到最大打招呼次数 " + MAX_GREETING_COUNT + "，准备停止服务");
+                        isServiceStopping = true;
+                        handler.postDelayed(() -> {
+                            stopService();
+                        }, 2000);
+                        return;
+                    }
+                } else {
+                    logMessage("【跳过】当前职位已计数或无效，不增加打招呼次数");
                 }
                 
                 // 执行双重返回操作
                 performDoubleBackToMainPage();
-            }, 3000); // 增加延迟时间，确保页面完全加载
+            }, 3000);
             return;
         }
         
@@ -2272,14 +2106,11 @@ public class BossResumeService extends AccessibilityService {
                         greetingCount++;
                         logMessage("当前已打招呼次数: " + greetingCount + "/" + MAX_GREETING_COUNT);
                         
-                        // 检查是否达到最大打招呼次数
-                        if (greetingCount >= MAX_GREETING_COUNT) {
-                            logMessage("已达到最大打招呼次数 " + MAX_GREETING_COUNT + "，准备停止服务");
-                            handler.postDelayed(() -> {
-                                stopService();
-                            }, 3000);
-                            return;
-                        }
+                        // 不再检查是否达到最大打招呼次数
+                        // 移除下面的检查代码
+                        // if (greetingCount >= MAX_GREETING_COUNT && !isServiceStopping) {
+                        //    ...
+                        // }
                         
                         // 执行双重返回操作
                         performDoubleBackToMainPage();
@@ -2693,4 +2524,32 @@ public class BossResumeService extends AccessibilityService {
         
         return false;
     }
+
+    // 添加服务看门狗相关变量
+    private Handler serviceWatchdogHandler = new Handler(Looper.getMainLooper());
+    private Runnable serviceWatchdogRunnable;
+    private static final long SERVICE_WATCHDOG_INTERVAL = 60000; // 每分钟检查一次服务状态
+
+    // 增加一个标记，记录当前处理的职位ID，避免重复计数
+    private String currentJobId = "";
+    private boolean hasCountedCurrentJob = false;
+
+
+
+
+
+
+
+
+    
+    // 发送通知提醒
+    private void sendNotification(String title, String content) {
+        // 简单记录日志，实际上这里可以实现发送系统通知
+        logMessage("系统通知: " + title + " - " + content);
+    }
+
+    // 设置一个调试开关变量
+    private static final boolean DEBUG_LOG_ALL_NODES = false; // 设置为false关闭详细日志
+    
+
 } 

@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:padding="16dp"
     tools:context=".MainActivity">
 
@@ -19,6 +18,7 @@
         android:id="@+id/btn_accessibility_settings"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_below="@id/tv_status"
         android:text="@string/open_accessibility_settings"
         android:layout_marginBottom="16dp" />
 
@@ -26,6 +26,7 @@
         android:id="@+id/btn_start"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_below="@id/btn_accessibility_settings"
         android:text="@string/start_service"
         android:layout_marginBottom="8dp" />
 
@@ -33,12 +34,27 @@
         android:id="@+id/btn_stop"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_below="@id/btn_start"
         android:text="@string/stop_service"
         android:layout_marginBottom="16dp" />
 
+    <TextView
+        android:id="@+id/versionInfoText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="16dp"
+        android:textSize="14sp"
+        android:textColor="#666666"
+        android:text="@string/version_info" />
+
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:layout_below="@id/btn_stop"
+        android:layout_above="@id/versionInfoText"
+        android:layout_marginBottom="16dp">
 
         <TextView
             android:id="@+id/tv_log"
@@ -47,4 +63,4 @@
             android:textSize="14sp" />
     </ScrollView>
 
-</LinearLayout> 
+</RelativeLayout> 

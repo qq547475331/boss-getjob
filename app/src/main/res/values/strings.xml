@@ -5,4 +5,6 @@
     <string name="stop_service">停止投递</string>
     <string name="service_status">服务状态：未启动</string>
     <string name="open_accessibility_settings">打开无障碍设置</string>
+    <string name="app_version">1.1.0.250305</string>
+    <string name="version_info">当前版本：%s</string>
 </resources>

@@ -32,6 +32,14 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // 显示版本信息
+        TextView versionInfoText = findViewById(R.id.versionInfoText);
+        String versionInfo = String.format(
+            getString(R.string.version_info), 
+            getString(R.string.app_version)
+        );
+        versionInfoText.setText(versionInfo);
+        
         tvStatus = findViewById(R.id.tv_status);
         tvLog = findViewById(R.id.tv_log);
         btnStart = findViewById(R.id.btn_start);
